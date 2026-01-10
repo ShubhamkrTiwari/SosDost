@@ -1,5 +1,5 @@
-import { StyleSheet, View, ScrollView, TouchableOpacity, Alert, FlatList, Pressable, Dimensions } from 'react-native';
-import { useState, useEffect, useCallback } from 'react';
+import { StyleSheet, View, ScrollView, TouchableOpacity, Alert, FlatList, Pressable, Dimensions, Modal, TextInput } from 'react-native';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Image } from 'expo-image';
 import Animated, { 
   useSharedValue, 
@@ -13,6 +13,7 @@ import Animated, {
   withSpring
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
+import * as Contacts from 'expo-contacts';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
@@ -28,11 +29,9 @@ interface EmergencyContact {
   relation: string;
 }
 
-const EMERGENCY_CONTACTS: EmergencyContact[] = [
-  { id: '1', name: 'Police Control', phone: '100', icon: 'shield.fill', relation: 'Official' },
-  { id: '2', name: 'Ambulance', phone: '102', icon: 'cross.circle.fill', relation: 'Medical' },
-  { id: '3', name: 'Mom', phone: '+91 98765 43210', icon: 'person.fill', relation: 'Family' },
-  { id: '4', name: 'Dad', phone: '+91 98765 43211', icon: 'person.fill', relation: 'Family' },
+const DEFAULT_CONTACTS: EmergencyContact[] = [
+  { id: 'police', name: 'Police Control', phone: '100', icon: 'shield.fill', relation: 'Official' },
+  { id: 'ambulance', name: 'Ambulance', phone: '102', icon: 'cross.circle.fill', relation: 'Medical' },
 ];
 
 const PulseRing = ({ delay = 0, color = '#ff3b30' }) => {
@@ -73,6 +72,10 @@ export default function SOSScreen() {
   const isDark = colorScheme === 'dark';
   const [isActivating, setIsActivating] = useState(false);
   const [sosActive, setSOSActive] = useState(false);
+  const [priorityContacts, setPriorityContacts] = useState<EmergencyContact[]>(DEFAULT_CONTACTS);
+  const [isPickerVisible, setIsPickerVisible] = useState(false);
+  const [deviceContacts, setDeviceContacts] = useState<Contacts.Contact[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
   
   const progress = useSharedValue(0);
   const buttonScale = useSharedValue(1);
@@ -110,6 +113,64 @@ export default function SOSScreen() {
     }
   };
 
+  const openContactPicker = async () => {
+    const { status } = await Contacts.requestPermissionsAsync();
+    if (status === 'granted') {
+      const { data } = await Contacts.getContactsAsync({
+        fields: [Contacts.Fields.Emails, Contacts.Fields.PhoneNumbers],
+      });
+
+      if (data.length > 0) {
+        setDeviceContacts(data);
+        setIsPickerVisible(true);
+      } else {
+        Alert.alert('No contacts found');
+      }
+    } else {
+      Alert.alert('Permission Denied', 'Please enable contacts permission in settings to add priority contacts.');
+    }
+  };
+
+  const addContact = (contact: Contacts.Contact) => {
+    const phoneNumber = contact.phoneNumbers?.[0]?.number;
+    if (!phoneNumber) {
+      Alert.alert('Error', 'This contact has no phone number');
+      return;
+    }
+
+    const newContact: EmergencyContact = {
+      id: contact.id || Math.random().toString(),
+      name: contact.name,
+      phone: phoneNumber,
+      icon: 'person.fill',
+      relation: 'Added Contact',
+    };
+
+    if (priorityContacts.find(c => c.phone === phoneNumber)) {
+      Alert.alert('Info', 'Contact already in priority list');
+      return;
+    }
+
+    setPriorityContacts([...priorityContacts, newContact]);
+    setIsPickerVisible(false);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  };
+
+  const removeContact = (id: string) => {
+    if (id === 'police' || id === 'ambulance') {
+      Alert.alert('Action Restricted', 'Default emergency services cannot be removed.');
+      return;
+    }
+    setPriorityContacts(priorityContacts.filter(c => c.id !== id));
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+  };
+
+  const filteredContacts = useMemo(() => {
+    return deviceContacts.filter(c => 
+      c.name.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  }, [deviceContacts, searchQuery]);
+
   const animatedButtonStyle = useAnimatedStyle(() => ({
     transform: [{ scale: buttonScale.value }],
     backgroundColor: interpolate(progress.value, [0, 1], [0, 1]) > 0.5 ? '#d32f2f' : '#ff3b30',
@@ -127,6 +188,7 @@ export default function SOSScreen() {
         { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF' },
         styles.shadow
       ]}
+      onLongPress={() => removeContact(item.id)}
       onPress={() => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         Alert.alert(`Call ${item.name}?`, `Dialing ${item.phone}`);
@@ -238,10 +300,12 @@ export default function SOSScreen() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <ThemedText style={styles.sectionTitle}>Priority Contacts</ThemedText>
-            <TouchableOpacity><ThemedText style={styles.editLink}>Manage</ThemedText></TouchableOpacity>
+            <TouchableOpacity onPress={openContactPicker}>
+              <ThemedText style={styles.editLink}>Manage</ThemedText>
+            </TouchableOpacity>
           </View>
           <FlatList
-            data={EMERGENCY_CONTACTS}
+            data={priorityContacts}
             renderItem={renderContactCard}
             keyExtractor={(item) => item.id}
             scrollEnabled={false}
@@ -258,6 +322,55 @@ export default function SOSScreen() {
 
         <View style={styles.footerSpace} />
       </ScrollView>
+
+      {/* Contact Picker Modal */}
+      <Modal
+        visible={isPickerVisible}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setIsPickerVisible(false)}
+      >
+        <ThemedView style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <ThemedText style={styles.modalTitle}>Select Contact</ThemedText>
+            <TouchableOpacity onPress={() => setIsPickerVisible(false)}>
+              <ThemedText style={styles.closeText}>Close</ThemedText>
+            </TouchableOpacity>
+          </View>
+          
+          <View style={[styles.searchBar, { backgroundColor: isDark ? '#1C1C1E' : '#F2F2F7' }]}>
+            <IconSymbol name="magnifyingglass" size={18} color={isDark ? '#FFF' : '#000'} opacity={0.5} />
+            <TextInput
+              placeholder="Search contacts..."
+              placeholderTextColor="#888"
+              style={[styles.searchInput, { color: isDark ? '#FFF' : '#000' }]}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
+          </View>
+
+          <FlatList
+            data={filteredContacts}
+            keyExtractor={(item) => item.id || Math.random().toString()}
+            renderItem={({ item }) => (
+              <TouchableOpacity 
+                style={styles.pickerItem}
+                onPress={() => addContact(item)}
+              >
+                <View style={[styles.pickerIcon, { backgroundColor: isDark ? '#1C1C1E' : '#F2F2F7' }]}>
+                  <ThemedText style={styles.pickerInitial}>{item.name[0]}</ThemedText>
+                </View>
+                <View>
+                  <ThemedText style={styles.pickerName}>{item.name}</ThemedText>
+                  <ThemedText style={styles.pickerPhone}>
+                    {item.phoneNumbers?.[0]?.number || 'No number'}
+                  </ThemedText>
+                </View>
+              </TouchableOpacity>
+            )}
+          />
+        </ThemedView>
+      </Modal>
     </ThemedView>
   );
 }
@@ -510,5 +623,70 @@ const styles = StyleSheet.create({
   },
   footerSpace: {
     height: 40,
-  }
+  },
+  // Modal Styles
+  modalContainer: {
+    flex: 1,
+    paddingTop: 20,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0,0,0,0.05)',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  closeText: {
+    color: '#ff3b30',
+    fontWeight: '600',
+  },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    margin: 15,
+    paddingHorizontal: 15,
+    height: 44,
+    borderRadius: 12,
+  },
+  searchInput: {
+    flex: 1,
+    marginLeft: 10,
+    fontSize: 16,
+  },
+  pickerItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0,0,0,0.02)',
+  },
+  pickerIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 15,
+  },
+  pickerInitial: {
+    fontSize: 18,
+    fontWeight: '700',
+    opacity: 0.5,
+  },
+  pickerName: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  pickerPhone: {
+    fontSize: 13,
+    opacity: 0.5,
+    marginTop: 2,
+  },
 });
