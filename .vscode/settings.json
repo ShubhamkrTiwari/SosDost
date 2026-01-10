@@ -3,5 +3,10 @@
     "source.fixAll": "explicit",
     "source.organizeImports": "explicit",
     "source.sortMembers": "explicit"
-  }
+  },
+  "chat.checkpoints.showFileChanges": true,
+  "files.autoSave": "onWindowChange",
+  "explorer.excludeGitIgnore": true,
+  "git.allowForcePush": true,
+  "git.enableCommitSigning": true
 }
