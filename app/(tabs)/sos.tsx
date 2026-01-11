@@ -74,6 +74,7 @@ export default function SOSScreen() {
   const [sosActive, setSOSActive] = useState(false);
   const [priorityContacts, setPriorityContacts] = useState<EmergencyContact[]>(DEFAULT_CONTACTS);
   const [isPickerVisible, setIsPickerVisible] = useState(false);
+  const [isRecordSheetVisible, setIsRecordSheetVisible] = useState(false);
   const [deviceContacts, setDeviceContacts] = useState<Contacts.Contact[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   
@@ -181,6 +182,12 @@ export default function SOSScreen() {
     opacity: isActivating ? 1 : 0,
   }));
 
+  const handleRecordAction = (type: 'audio' | 'video') => {
+    setIsRecordSheetVisible(false);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    Alert.alert(`Starting ${type} recording...`, 'The feed will be uploaded to the safety cloud.');
+  };
+
   const renderContactCard = ({ item }: { item: EmergencyContact }) => (
     <TouchableOpacity
       style={[
@@ -278,6 +285,7 @@ export default function SOSScreen() {
               subLabel="Audio/Video" 
               color="#5856d6" 
               isDark={isDark} 
+              onPress={() => setIsRecordSheetVisible(true)}
             />
             <ActionCard 
               image="https://img.icons8.com/fluency/96/shield.png" 
@@ -371,13 +379,73 @@ export default function SOSScreen() {
           />
         </ThemedView>
       </Modal>
+
+      {/* Recording Selection Bottom Sheet (Modal) */}
+      <Modal
+        visible={isRecordSheetVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setIsRecordSheetVisible(false)}
+      >
+        <Pressable 
+          style={styles.overlay} 
+          onPress={() => setIsRecordSheetVisible(false)}
+        >
+          <ThemedView style={[styles.bottomSheet, { backgroundColor: isDark ? '#1C1C1E' : '#FFF' }]}>
+            <View style={styles.sheetHeader}>
+              <View style={styles.sheetHandle} />
+              <ThemedText style={styles.sheetTitle}>Choose Recording Type</ThemedText>
+            </View>
+            
+            <View style={styles.sheetOptions}>
+              <TouchableOpacity 
+                style={[styles.sheetOption, { backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7' }]}
+                onPress={() => handleRecordAction('audio')}
+              >
+                <View style={[styles.optionIconContainer, { backgroundColor: 'rgba(88, 86, 214, 0.1)' }]}>
+                  <IconSymbol name="mic.fill" size={24} color="#5856d6" />
+                </View>
+                <ThemedText style={styles.optionLabel}>Audio Only</ThemedText>
+                <ThemedText style={styles.optionSub}>Stealth recording</ThemedText>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={[styles.sheetOption, { backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7' }]}
+                onPress={() => handleRecordAction('video')}
+              >
+                <View style={[styles.optionIconContainer, { backgroundColor: 'rgba(255, 59, 48, 0.1)' }]}>
+                  <IconSymbol name="video.fill" size={24} color="#ff3b30" />
+                </View>
+                <ThemedText style={styles.optionLabel}>Video & Audio</ThemedText>
+                <ThemedText style={styles.optionSub}>Full evidence capture</ThemedText>
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity 
+              style={styles.cancelButton}
+              onPress={() => setIsRecordSheetVisible(false)}
+            >
+              <ThemedText style={styles.cancelText}>Cancel</ThemedText>
+            </TouchableOpacity>
+          </ThemedView>
+        </Pressable>
+      </Modal>
     </ThemedView>
   );
 }
 
-function ActionCard({ image, label, subLabel, color, isDark }: any) {
+function ActionCard({ image, label, subLabel, color, isDark, onPress }: any) {
   return (
-    <TouchableOpacity style={[styles.actionCard, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF' }, styles.shadow]}>
+    <TouchableOpacity 
+      style={[styles.actionCard, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF' }, styles.shadow]}
+      onPress={() => {
+        if (onPress) {
+          onPress();
+        } else {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        }
+      }}
+    >
       <View style={[styles.actionIcon, { backgroundColor: `${color}10` }]}>
         <Image 
           source={{ uri: image }} 
@@ -688,5 +756,69 @@ const styles = StyleSheet.create({
     fontSize: 13,
     opacity: 0.5,
     marginTop: 2,
+  },
+  // Bottom Sheet Styles
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'flex-end',
+  },
+  bottomSheet: {
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    paddingBottom: 40,
+    paddingHorizontal: 24,
+  },
+  sheetHeader: {
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  sheetHandle: {
+    width: 40,
+    height: 4,
+    backgroundColor: 'rgba(0,0,0,0.1)',
+    borderRadius: 2,
+    marginBottom: 16,
+  },
+  sheetTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  sheetOptions: {
+    marginTop: 20,
+    gap: 12,
+  },
+  sheetOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderRadius: 20,
+  },
+  optionIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  optionLabel: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  optionSub: {
+    fontSize: 13,
+    opacity: 0.5,
+    marginLeft: 'auto',
+  },
+  cancelButton: {
+    marginTop: 20,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  cancelText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#ff3b30',
   },
 });
