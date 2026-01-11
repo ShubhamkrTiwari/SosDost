@@ -1,4 +1,4 @@
-import { StyleSheet, View, ScrollView, TouchableOpacity, Alert, FlatList, Pressable, Dimensions, Modal, TextInput, Platform } from 'react-native';
+import { StyleSheet, View, ScrollView, TouchableOpacity, Alert, FlatList, Pressable, Dimensions, Modal, TextInput, Platform, Share, ActionSheetIOS } from 'react-native';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Image } from 'expo-image';
 import Animated, { 
@@ -81,8 +81,39 @@ export default function SOSScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
   const [address, setAddress] = useState<string>('Fetching location...');
+  const [isSafewalkVisible, setIsSafewalkVisible] = useState(false);
+  const [safewalkTime, setSafewalkTime] = useState(0);
+  const [isSafewalkActive, setIsSafewalkActive] = useState(false);
   
   const progress = useSharedValue(0);
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (isSafewalkActive && safewalkTime > 0) {
+      interval = setInterval(() => {
+        setSafewalkTime((prev) => prev - 1);
+      }, 1000);
+    } else if (safewalkTime === 0 && isSafewalkActive) {
+      setIsSafewalkActive(false);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      Alert.alert('Safewalk Timer Ended', 'Are you safe? If not, trigger SOS immediately.');
+    }
+    return () => clearInterval(interval);
+  }, [isSafewalkActive, safewalkTime]);
+
+  const startSafewalk = (minutes: number) => {
+    setSafewalkTime(minutes * 60);
+    setIsSafewalkActive(true);
+    setIsSafewalkVisible(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    Alert.alert('Safewalk Started', `A message has been sent to your contacts: "I am starting a Safewalk. I am currently at ${address}. I will check in when I arrive."`);
+  };
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+  };
 
   useEffect(() => {
     (async () => {
@@ -111,6 +142,47 @@ export default function SOSScreen() {
       }
     })();
   }, []);
+
+  const shareLocation = async () => {
+    if (location) {
+      const { latitude, longitude } = location.coords;
+      const mapUrl = `https://www.google.com/maps/search/?api=1&query=${latitude},longitude=${longitude}`;
+      try {
+        await Share.share({
+          message: `My current location: ${address}\nView on map: ${mapUrl}`,
+        });
+      } catch {
+        Alert.alert('Error sharing location');
+      }
+    } else {
+      Alert.alert('Location not available');
+    }
+  };
+
+  const handleLocationPress = () => {
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: ['Cancel', 'View on Map', 'Share Location'],
+          cancelButtonIndex: 0,
+        },
+        (buttonIndex) => {
+          if (buttonIndex === 1) openMap();
+          else if (buttonIndex === 2) shareLocation();
+        }
+      );
+    } else {
+      Alert.alert(
+        'Location Options',
+        'Choose an action for your current location:',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'View on Map', onPress: openMap },
+          { text: 'Share Location', onPress: shareLocation },
+        ]
+      );
+    }
+  };
 
   const openMap = () => {
     if (location) {
@@ -267,9 +339,10 @@ export default function SOSScreen() {
         <View style={styles.header}>
           <View>
             <ThemedText style={styles.greeting}>Emergency Hub</ThemedText>
-            <TouchableOpacity onPress={openMap} style={styles.locationContainer}>
+            <TouchableOpacity onPress={handleLocationPress} style={styles.locationContainer}>
               <IconSymbol name="mappin.and.ellipse" size={14} color="#ff3b30" />
               <ThemedText style={styles.addressText} numberOfLines={1}>{address}</ThemedText>
+              <IconSymbol name="square.and.arrow.up" size={12} color="#ff3b30" style={{ marginLeft: 4 }} />
             </TouchableOpacity>
             <View style={styles.statusBadge}>
               <View style={[styles.statusDot, { backgroundColor: sosActive ? '#ff3b30' : '#34c759' }]} />
@@ -325,10 +398,10 @@ export default function SOSScreen() {
             <ActionCard 
               image="https://img.icons8.com/fluency/96/marker.png" 
               label="Live Track" 
-              subLabel="View on Map" 
+              subLabel="View or Share" 
               color="#34c759" 
               isDark={isDark} 
-              onPress={openMap}
+              onPress={handleLocationPress}
             />
             <ActionCard 
               image="https://img.icons8.com/fluency/96/microphone.png" 
@@ -341,9 +414,25 @@ export default function SOSScreen() {
             <ActionCard 
               image="https://img.icons8.com/fluency/96/shield.png" 
               label="Safewalk" 
-              subLabel="Timer Mode" 
+              subLabel={isSafewalkActive ? `Active: ${formatTime(safewalkTime)}` : "Timer Mode"} 
               color="#ff9500" 
               isDark={isDark} 
+              onPress={() => {
+                if (isSafewalkActive) {
+                  setIsSafewalkVisible(true);
+                } else {
+                  Alert.alert(
+                    'Safewalk Timer',
+                    'Set duration for your walk:',
+                    [
+                      { text: '10 Mins', onPress: () => startSafewalk(10) },
+                      { text: '20 Mins', onPress: () => startSafewalk(20) },
+                      { text: '30 Mins', onPress: () => startSafewalk(30) },
+                      { text: 'Cancel', style: 'cancel' }
+                    ]
+                  );
+                }
+              }}
             />
             <ActionCard 
               image="https://img.icons8.com/fluency/96/phone.png" 
@@ -480,6 +569,54 @@ export default function SOSScreen() {
             </TouchableOpacity>
           </ThemedView>
         </Pressable>
+      </Modal>
+
+      {/* Safewalk Modal */}
+      <Modal
+        visible={isSafewalkVisible}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setIsSafewalkVisible(false)}
+      >
+        <View style={styles.overlay}>
+          <ThemedView style={[styles.bottomSheet, { backgroundColor: isDark ? '#1C1C1E' : '#FFF', height: 600, paddingTop: 10 }]}>
+            <View style={styles.sheetHeader}>
+              <View style={styles.sheetHandle} />
+              <ThemedText style={styles.sheetTitle}>Safewalk Active</ThemedText>
+            </View>
+            
+            <View style={styles.timerContainer}>
+              <View style={styles.timerCircle}>
+                <ThemedText style={styles.timerText}>{formatTime(safewalkTime)}</ThemedText>
+                <ThemedText style={styles.timerLabel}>REMAINING</ThemedText>
+              </View>
+            </View>
+
+            <View style={styles.safewalkInfo}>
+              <IconSymbol name="checkmark.shield.fill" size={20} color="#34c759" />
+              <ThemedText style={styles.safewalkStatus}>Contacts have been notified of your walk.</ThemedText>
+            </View>
+
+            <TouchableOpacity 
+              style={[styles.safewalkButton, { backgroundColor: '#34c759' }]}
+              onPress={() => {
+                setIsSafewalkActive(false);
+                setIsSafewalkVisible(false);
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                Alert.alert('Arrived Safely', 'Your contacts have been notified that you reached your destination.');
+              }}
+            >
+              <ThemedText style={styles.safewalkButtonText}>I HAVE ARRIVED</ThemedText>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={styles.cancelButton}
+              onPress={() => setIsSafewalkVisible(false)}
+            >
+              <ThemedText style={styles.cancelText}>Keep Running in Background</ThemedText>
+            </TouchableOpacity>
+          </ThemedView>
+        </View>
       </Modal>
     </ThemedView>
   );
@@ -776,6 +913,64 @@ const styles = StyleSheet.create({
   closeText: {
     color: '#ff3b30',
     fontWeight: '600',
+  },
+  timerContainer: {
+    alignItems: 'center',
+    marginVertical: 40,
+    justifyContent: 'center',
+  },
+  timerCircle: {
+    width: 200,
+    height: 200,
+    borderRadius: 100,
+    borderWidth: 8,
+    borderColor: '#ff9500',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 149, 0, 0.05)',
+  },
+  timerText: {
+    fontSize: 48,
+    fontWeight: '800',
+    color: '#ff9500',
+  },
+  timerLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    opacity: 0.5,
+    marginTop: 4,
+    color: '#ff9500',
+  },
+  safewalkInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: 30,
+    backgroundColor: 'rgba(52, 199, 89, 0.1)',
+    padding: 12,
+    borderRadius: 16,
+  },
+  safewalkStatus: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#34c759',
+  },
+  safewalkButton: {
+    paddingVertical: 18,
+    borderRadius: 20,
+    alignItems: 'center',
+    shadowColor: '#34c759',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  safewalkButtonText: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: '800',
+    letterSpacing: 1,
   },
   searchBar: {
     flexDirection: 'row',
