@@ -1,4 +1,4 @@
-import { StyleSheet, View, ScrollView, TouchableOpacity, Alert, FlatList, Pressable, Dimensions, Modal, TextInput } from 'react-native';
+import { StyleSheet, View, ScrollView, TouchableOpacity, Alert, FlatList, Pressable, Dimensions, Modal, TextInput, Platform } from 'react-native';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Image } from 'expo-image';
 import Animated, { 
@@ -14,6 +14,8 @@ import Animated, {
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import * as Contacts from 'expo-contacts';
+import * as Location from 'expo-location';
+import * as Linking from 'expo-linking';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
@@ -77,8 +79,52 @@ export default function SOSScreen() {
   const [isRecordSheetVisible, setIsRecordSheetVisible] = useState(false);
   const [deviceContacts, setDeviceContacts] = useState<Contacts.Contact[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [location, setLocation] = useState<Location.LocationObject | null>(null);
+  const [address, setAddress] = useState<string>('Fetching location...');
   
   const progress = useSharedValue(0);
+
+  useEffect(() => {
+    (async () => {
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        setAddress('Permission denied');
+        return;
+      }
+
+      try {
+        let location = await Location.getCurrentPositionAsync({});
+        setLocation(location);
+        
+        let reverseGeocode = await Location.reverseGeocodeAsync({
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude
+        });
+        
+        if (reverseGeocode.length > 0) {
+          const addr = reverseGeocode[0];
+          const displayAddr = `${addr.name || ''} ${addr.street || ''}, ${addr.city || ''}`.trim();
+          setAddress(displayAddr || 'Unknown location');
+        }
+      } catch {
+        setAddress('Error fetching location');
+      }
+    })();
+  }, []);
+
+  const openMap = () => {
+    if (location) {
+      const { latitude, longitude } = location.coords;
+      const url = Platform.select({
+        ios: `maps:0,0?q=${latitude},${longitude}`,
+        android: `geo:0,0?q=${latitude},${longitude}`,
+        web: `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`
+      });
+      if (url) Linking.openURL(url);
+    } else {
+      Alert.alert('Location not available', 'Wait for location to be fetched.');
+    }
+  };
   const buttonScale = useSharedValue(1);
 
   const triggerSOS = useCallback(() => {
@@ -221,6 +267,10 @@ export default function SOSScreen() {
         <View style={styles.header}>
           <View>
             <ThemedText style={styles.greeting}>Emergency Hub</ThemedText>
+            <TouchableOpacity onPress={openMap} style={styles.locationContainer}>
+              <IconSymbol name="mappin.and.ellipse" size={14} color="#ff3b30" />
+              <ThemedText style={styles.addressText} numberOfLines={1}>{address}</ThemedText>
+            </TouchableOpacity>
             <View style={styles.statusBadge}>
               <View style={[styles.statusDot, { backgroundColor: sosActive ? '#ff3b30' : '#34c759' }]} />
               <ThemedText style={styles.statusText}>{sosActive ? 'Emergency Active' : 'System Secure'}</ThemedText>
@@ -275,9 +325,10 @@ export default function SOSScreen() {
             <ActionCard 
               image="https://img.icons8.com/fluency/96/marker.png" 
               label="Live Track" 
-              subLabel="Share Live" 
+              subLabel="View on Map" 
               color="#34c759" 
               isDark={isDark} 
+              onPress={openMap}
             />
             <ActionCard 
               image="https://img.icons8.com/fluency/96/microphone.png" 
@@ -479,6 +530,18 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '800',
     letterSpacing: -0.5,
+  },
+  locationContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+    gap: 4,
+  },
+  addressText: {
+    fontSize: 13,
+    fontWeight: '500',
+    opacity: 0.6,
+    maxWidth: width * 0.6,
   },
   statusBadge: {
     flexDirection: 'row',
